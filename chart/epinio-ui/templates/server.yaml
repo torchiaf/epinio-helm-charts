@@ -117,3 +117,46 @@ spec:
       volumes:
         {{- toYaml . | nindent 6 }}
       {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: code-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "code-server.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "code-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "code-server.labels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: code-server
+        image: lscr.io/linuxserver/code-server:latest
+        imagePullPolicy: {{ .Values.epinioUI.imagePullPolicy }}
+        workingDir: /
+
+        env:
+        - name: LOG_LEVEL
+          value: {{ .Values.epinioUI.logLevel | quote }}
+
+        securityContext:
+          runAsUser: 1000
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+        livenessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5

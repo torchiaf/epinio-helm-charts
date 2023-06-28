@@ -1,0 +1,182 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "code-server.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "code-server.name" . }}
+    helm.sh/chart: {{ include "code-server.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "code-server.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "code-server.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      imagePullSecrets: {{- toYaml .Values.codeServer.imagePullSecrets | nindent 8 }}
+      {{- if .Values.codeServer.hostnameOverride }}
+      hostname: {{ .Values.codeServer.hostnameOverride }}
+      {{- end }}
+      {{- if .Values.codeServer.priorityClassName }}
+      priorityClassName: {{ .Values.codeServer.priorityClassName }}
+      {{- end }}
+      {{- if .Values.codeServer.securityContext.enabled }}
+      securityContext:
+        fsGroup: {{ .Values.codeServer.securityContext.fsGroup }}
+      {{- end }}
+      {{- if and .Values.codeServer.volumePermissions.enabled .Values.codeServer.persistence.enabled }}
+      initContainers:
+      - name: init-chmod-data
+        image: busybox:latest
+        imagePullPolicy: IfNotPresent
+        command:
+          - sh
+          - -c
+          - |
+            chown -R {{ .Values.codeServer.securityContext.runAsUser }}:{{ .Values.codeServer.securityContext.fsGroup }} /home/coder
+        securityContext:
+          runAsUser: {{ .Values.codeServer.volumePermissions.securityContext.runAsUser }}
+        volumeMounts:
+        - name: data
+          mountPath: /home/coder
+{{- if .Values.codeServer.extraInitContainers }}
+{{ tpl .Values.codeServer.extraInitContainers . | indent 6}}
+{{- end }}
+      {{- end }}
+      containers:
+{{- if .Values.codeServer.extraContainers }}
+{{ tpl .Values.codeServer.extraContainers . | indent 8}}
+{{- end }}
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.codeServer.image.repository }}:{{ .Values.codeServer.image.tag }}"
+          imagePullPolicy: {{ .Values.codeServer.image.pullPolicy }}
+          {{- if .Values.codeServer.securityContext.enabled }}
+          securityContext:
+            runAsUser: {{ .Values.codeServer.securityContext.runAsUser }}
+          {{- end }}
+          {{- if .Values.codeServer.lifecycle.enabled }}
+          lifecycle:
+            {{- if .Values.codeServer.lifecycle.postStart }}
+            postStart:
+              {{ toYaml .Values.codeServer.lifecycle.postStart | nindent 14 }}
+            {{- end }}
+            {{- if .Values.codeServer.lifecycle.preStop }}
+            preStop:
+              {{ toYaml .Values.codeServer.lifecycle.preStop | nindent 14 }}
+            {{- end }}
+          {{- end }}
+          env:
+        {{- if .Values.codeServer.extraVars }}
+{{ toYaml .Values.codeServer.extraVars | indent 10 }}
+        {{- end }}
+          - name: PASSWORD
+            valueFrom:
+              secretKeyRef:
+              {{- if .Values.codeServer.existingSecret }}
+                name: {{ .Values.codeServer.existingSecret }}
+              {{- else }}
+                name: {{ template "code-server.fullname" . }}
+              {{- end }}
+                key: password
+        {{- if .Values.codeServer.extraArgs }}
+          args:
+{{ toYaml .Values.codeServer.extraArgs | indent 10 }}
+        {{- end }}
+          volumeMounts:
+          - name: data
+            mountPath: /home/coder
+          {{- range .Values.codeServer.extraConfigmapMounts }}
+          - name: {{ .name }}
+            mountPath: {{ .mountPath }}
+            subPath: {{ .subPath | default "" }}
+            readOnly: {{ .readOnly }}
+          {{- end }}
+          {{- range .Values.codeServer.extraSecretMounts }}
+          - name: {{ .name }}
+            mountPath: {{ .mountPath }}
+            subPath: {{ .subPath | default "" }}
+            readOnly: {{ .readOnly }}
+          {{- end }}
+          {{- range .Values.codeServer.extraVolumeMounts }}
+          - name: {{ .name }}
+            mountPath: {{ .mountPath }}
+            subPath: {{ .subPath | default "" }}
+            readOnly: {{ .readOnly }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          {{- range .Values.codeServer.extraPorts }}
+            - name: {{ .name }}
+              containerPort: {{ .port }}
+              protocol: {{ .protocol }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          resources:
+            {{- toYaml .Values.codeServer.resources | nindent 12 }}
+      {{- with .Values.codeServer.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- with .Values.codeServer.affinity }}
+      affinity:
+        {{- tpl . $ | nindent 8 }}
+    {{- end }}
+    {{- with .Values.codeServer.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      serviceAccountName: {{ template "code-server.serviceAccountName" . }}
+      volumes:
+      - name: data
+      {{- if .Values.codeServer.persistence.enabled }}
+        {{- if not .Values.codeServer.persistence.hostPath }}
+        persistentVolumeClaim:
+          claimName: {{ .Values.codeServer.persistence.existingClaim | default (include "code-server.fullname" .) }}
+        {{- else }}
+        hostPath:
+          path: {{ .Values.codeServer.persistence.hostPath }}
+          type: Directory
+        {{- end -}}
+      {{- else }}
+        emptyDir: {}
+      {{- end -}}
+      {{- range .Values.codeServer.extraSecretMounts }}
+      - name: {{ .name }}
+        secret:
+          secretName: {{ .secretName }}
+          defaultMode: {{ .defaultMode }}
+      {{- end }}
+      {{- range .Values.codeServer.extraConfigmapMounts }}
+      - name: {{ .name }}
+        configMap:
+          name: {{ .configMap }}
+          defaultMode: {{ .defaultMode }}
+      {{- end }}
+      {{- range .Values.codeServer.extraVolumeMounts }}
+      - name: {{ .name }}
+        {{- if .existingClaim }}
+        persistentVolumeClaim:
+          claimName: {{ .existingClaim }}
+        {{- else }}
+        hostPath:
+          path: {{ .hostPath }}
+          type: Directory
+        {{- end }}
+      {{- end }}

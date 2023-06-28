@@ -51,6 +51,20 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Code server labels
+*/}}
+{{- define "code-server.labels" -}}
+app.kubernetes.io/code-server: code-server
+{{- end }}
+
+{{/*
+Selector labels
+*/}}
+{{- define "code-server.selectorLabels" -}}
+app.kubernetes.io/code-server: code-server
+{{- end }}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "epinio-ui.serviceAccountName" -}}
